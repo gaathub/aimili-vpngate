@@ -346,7 +346,33 @@ def get_session_token(password: str, username: str = "admin") -> str:
 _last_cleanup_time = 0.0
 
 def cleanup_old_logs(logs_dir: Path) -> None:
-    ...
+    global _last_cleanup_time
+    now = time.time()
+    with lock:
+        if now - _last_cleanup_time < 3600:
+            return
+        _last_cleanup_time = now
+    try:
+        three_days_sec = 3 * 24 * 60 * 60
+        for path in logs_dir.glob("*.json"):
+            match = re.match(r"^(\d{4}-\d{2}-\d{2})\.json$", path.name)
+            if match:
+                date_str = match.group(1)
+                try:
+                    file_time = time.mktime(time.strptime(date_str, "%Y-%m-%d"))
+                    today_str = time.strftime("%Y-%m-%d", time.localtime())
+                    today_time = time.mktime(time.strptime(today_str, "%Y-%m-%d"))
+                    if today_time - file_time >= three_days_sec:
+                        with lock:
+                            path.unlink()
+                        print(f"[清理] 已删除3天前的旧日志文件: {path.name}", flush=True)
+                except Exception:
+                    if now - path.stat().st_mtime > three_days_sec:
+                        with lock:
+                            path.unlink()
+    except Exception as e:
+        print(f"[清理错误] 清理旧日志失败: {e}", flush=True)
+
 def log_to_json(level: str, module: str, message: str) -> None:
     try:
         logs_dir = DATA_DIR / "logs"
